@@ -40,7 +40,7 @@ window.addEventListener( "DOMContentLoaded", ( ) => {
         return sep;
     }
     const getMorton = ( v ) => {
-        bitSep( v.x ) | ( bitSep( v.y ) << 1 ) | ( bitSep( v.z ) << 2 );
+        return bitSep( v.x ) | ( bitSep( v.y ) << 1 ) | ( bitSep( v.z ) << 2 );
     };
     const getMortonIndex = ( a, b ) => {
         const [aMorton, bMorton] = [getMorton( a ), getMorton( b )];
