@@ -1,12 +1,16 @@
 {
     "devDependencies": {
         "eslint": "^8.52.0",
+        "gh-pages": "^6.1.0",
+        "rimraf": "^5.0.5",
         "vite": "^4.5.0"
     },
     "dependencies": {
         "three": "^0.158.0"
     },
     "scripts": {
-        "debug": "npx vite"
+        "debug": "npx vite",
+        "build": "vite build",
+        "deploy": "gh-pages -d ./dist"
     }
 }
