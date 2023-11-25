@@ -31,38 +31,35 @@ window.addEventListener( "DOMContentLoaded", ( ) => {
         new THREE.Vector3( 0, 0, AREA_HALF ),  //front
         new THREE.Vector3( 0, 0, -AREA_HALF ), //back
     ];
-    // bit separator for division-level:3
+    // bit separator for division-level=3. (0 <= n <= 7)
     const bitSep = ( n ) => {
-        // let sep = n < 0 ? 0 : n >>> 0;
         let sep = n >>> 0;
         sep = ( sep | ( sep << 8 ) ) & 0x0000f00f;
         sep = ( sep | ( sep << 4 ) ) & 0x000c30c3;
         sep = ( sep | ( sep << 2 ) ) & 0x00249249;
         return sep;
     }
-    // const getMorton = ( x, y, z ) => {
-    //     return bitSep( x ) | ( bitSep( y ) << 1 ) | ( bitSep( z ) << 2 )
-    // }
+    const getMorton = ( v ) => {
+        bitSep( v.x ) | ( bitSep( v.y ) << 1 ) | ( bitSep( v.z ) << 2 );
+    };
     const getMortonIndex = ( a, b ) => {
-        const aMorton = bitSep( a.x ) | ( bitSep( a.y ) << 1 ) | ( bitSep( a.z ) << 2 );
-        const bMorton = bitSep( b.x ) | ( bitSep( b.y ) << 1 ) | ( bitSep( b.z ) << 2 );
+        const [aMorton, bMorton] = [getMorton( a ), getMorton( b )];
         let bit = aMorton ^ bMorton;
         let upperLevel = 0;
         while ( bit ) {
             bit = bit >> DEVISION_LEVEL;
             upperLevel++;
         }
-        const belongLevel = DEVISION_LEVEL - upperLevel;
         const mortonNumber = aMorton >>> ( DEVISION_LEVEL * upperLevel );
+        const belongLevel = DEVISION_LEVEL - upperLevel;
         const mortonIndex = mortonNumber + ( ( ( DEVISIONS ** belongLevel ) - 1 ) / ( DEVISIONS - 1 ) );
-        // console.log( [aMorton, bMorton, morton, belongLevel, mortonIndex].join( "," ) );
         return mortonIndex;
     }
     const fixed = ( num, fractionDigits = 1 ) => {
         return Number.parseFloat( num ).toFixed( fractionDigits );
     }
     const toStringVector = ( v ) => {
-        return "[" + fixed( v.x ) + ":" + fixed( v.y ) + ":" + fixed( v.z ) + "]";
+        return "[" + fixed( v.x ) + ", " + fixed( v.y ) + ", " + fixed( v.z ) + "]";
     }
     /* --------Class-------- */
     class XorShift {
@@ -85,7 +82,7 @@ window.addEventListener( "DOMContentLoaded", ( ) => {
         }
     }
     const RANDOM = new XorShift( /* Date.now() */ );
-    
+    // ボールクラス
     class Ball extends THREE.Mesh {
         // 反発係数
         static restitution = 0.96;
@@ -101,7 +98,6 @@ window.addEventListener( "DOMContentLoaded", ( ) => {
             selected: new THREE.MeshStandardMaterial( {
                 color: 0xff0000, roughness: 0.5, metalness: 1.0, } ),
         };
-        // ボールクラス
         constructor ( isGravityAffected = false ) {
             super(
                 Ball.geometries.default,
@@ -249,16 +245,15 @@ window.addEventListener( "DOMContentLoaded", ( ) => {
         }
         toString () {
             return (
-                "Scale:" + toStringVector( this.scale ) + "<br />" +
-                "Position:" + toStringVector( this.position ) + "<br />" +
-                "Velocity:" + toStringVector( this.velocity ) + "<br />" +
-                "Accelaration:" + toStringVector( this.acceleration ) + "<br />" +
-                "Morton(index):" + this.mortonIndex + "<br />" + 
-                "Moved:" + fixed( this.moved ) + "<br />"
+                "Scale        :" + toStringVector( this.scale ) + "<br />" +
+                "Position     :" + toStringVector( this.position ) + "<br />" +
+                "Velocity     :" + toStringVector( this.velocity ) + "<br />" +
+                "Accelaration :" + toStringVector( this.acceleration ) + "<br />" +
+                "Morton(index):" + this.mortonIndex + "<br />" +
+                "Moved        :" + fixed( this.moved ) + "<br />"
             );
         }
     }
-
     /* --------Renderer-------- */
     const renderer = new THREE.WebGLRenderer();
     renderer.shadowMap.enabled = true;
@@ -268,7 +263,13 @@ window.addEventListener( "DOMContentLoaded", ( ) => {
     /* --------Scene-------- */
     const scene = new THREE.Scene();
     scene.add( new THREE.AxesHelper( AREA_SIZE ) );
-    /* --------Light-------- */
+    /* --------Camera-------- */
+    const mainCam = new THREE.PerspectiveCamera( 75, window.innerWidth / window.innerHeight, 1, 5000 );
+    mainCam.position.set( AREA_SIZE, AREA_SIZE * 0.2, AREA_SIZE );
+    console.info( mainCam );
+    /* --------OrbitControls-------- */
+    const controls = new OrbitControls( mainCam, renderer.domElement );
+    /* --------Lights-------- */
     scene.add( new THREE.AmbientLight( 0xffffff, 0.05 ) );
     const spotLight = new THREE.SpotLight( 0xffffff, 64 );
     spotLight.angle = Math.PI / 12;
@@ -281,17 +282,32 @@ window.addEventListener( "DOMContentLoaded", ( ) => {
     spotLight.target = spotLightTarget;
     scene.add( spotLightTarget );
     console.info( spotLight );
-    /* --------Camera-------- */
-    const mainCam = new THREE.PerspectiveCamera( 75, window.innerWidth / window.innerHeight, 1, 5000 );
-    mainCam.position.set( AREA_SIZE, AREA_SIZE * 0.2, AREA_SIZE );
-    // mainCam.lookAt( originPoint.clone().setY( -boxSize ) );
-    console.info( mainCam );
-    /* --------OrbitControls-------- */
-    const controls = new OrbitControls( mainCam, renderer.domElement );
     controls.enableDamping = true;
-    // raycaster and mouse position
-    const raycaster = new THREE.Raycaster();
-    const mouse = new THREE.Vector2();
+    /* --------Objects-------- */
+    const ballSet = new Set();
+    for ( let i = 0; i < BALLS_VOLUME; i++ ) {
+        const ball = new Ball( );
+        ball.randomize();
+        ballSet.add( ball );
+        scene.add( ball );
+    }
+    /* --------Planes-------- */
+    const planes = [];
+    const planeBase = new THREE.Mesh(
+        new THREE.PlaneGeometry( AREA_SIZE, AREA_SIZE ),
+        new THREE.MeshStandardMaterial( { color: 0xabedef, transparent: true, opacity: 0.8} )
+    );
+    planeBase.receiveShadow = true;
+    planePositions.forEach( position => {
+        const plane = planeBase.clone();
+        plane.position.copy( position );
+        plane.lookAt( ORIGIN_POINT );
+        plane.geometry.computeBoundingBox();
+        plane.userData.bBox = new THREE.Box3().setFromObject( plane );
+        plane.userData.normal = ORIGIN_POINT.clone().sub( plane.position ).normalize();
+        scene.add( plane );
+        planes.push( plane );
+    } );
     /* --------Visualize Morton Area-------- */
     const octreeUnits = [];
     const unitBase = new THREE.Mesh(
@@ -300,7 +316,6 @@ window.addEventListener( "DOMContentLoaded", ( ) => {
         ),
         new THREE.MeshBasicMaterial( {
             color: 0xcccccc,
-            // transparent: true, opacity: 0.8,
             wireframe: true,
         } )
     );
@@ -330,32 +345,9 @@ window.addEventListener( "DOMContentLoaded", ( ) => {
             }
         }
     }
-    /* --------Objects-------- */
-    const ballSet = new Set();
-    for ( let i = 0; i < BALLS_VOLUME; i++ ) {
-        const ball = new Ball( );
-        ball.randomize();
-        ballSet.add( ball );
-        scene.add( ball );
-    }
-    /* --------Planes-------- */
-    const planes = [];
-    const planeBase = new THREE.Mesh(
-        new THREE.PlaneGeometry( AREA_SIZE, AREA_SIZE ),
-        new THREE.MeshStandardMaterial( { color: 0xabedef, transparent: true, opacity: 0.8} )
-    );
-    planeBase.receiveShadow = true;
-    planePositions.forEach( position => {
-        const plane = planeBase.clone();
-        plane.position.copy( position );
-        plane.lookAt( ORIGIN_POINT );
-        plane.geometry.computeBoundingBox();
-        plane.userData.bBox = new THREE.Box3().setFromObject( plane );
-        plane.userData.normal = ORIGIN_POINT.clone().sub( plane.position ).normalize();
-        scene.add( plane );
-        planes.push( plane );
-    } );
-
+    /* --------Raycaster with Mouse Position-------- */
+    const raycaster = new THREE.Raycaster();
+    const mouse = new THREE.Vector2();
     /* --------Animation-------- */
     const handler = {
         id : undefined,
@@ -482,8 +474,7 @@ window.addEventListener( "DOMContentLoaded", ( ) => {
         handler.id = requestAnimationFrame( animate );
     };
     animate( performance.now() );
-
-    /* --------Control-------- */
+    /* --------Controls-------- */
     window.addEventListener( "mousemove", ( event ) => {
         mouse.setX( ( event.x / window.innerWidth ) * 2 - 1 );
         mouse.setY( -( event.y / window.innerHeight ) * 2 + 1 );

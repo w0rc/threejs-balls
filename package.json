@@ -10,7 +10,7 @@
     },
     "scripts": {
         "debug": "npx vite",
-        "build": "vite build",
+        "build": "rimraf ./dist && vite build",
         "deploy": "gh-pages -d ./dist"
     }
 }
