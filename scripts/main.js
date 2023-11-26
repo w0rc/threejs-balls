@@ -10,51 +10,14 @@ window.addEventListener( "DOMContentLoaded", ( ) => {
     const fpsViewer = document.getElementById( "fpsViewer" );
     // シミュレーション用の重力加速度ベクトル
     const GRAVITY = new THREE.Vector3( 0, -9.80665, 0 );
-    // シミュレーションエリアの原点とする中心座標
-    const ORIGIN_POINT = new THREE.Vector3( 0, 0, 0 );
     // シミュレーションエリアのサイズ
     const AREA_SIZE = 256, AREA_HALF = AREA_SIZE / 2;
     // シミュレーションエリアの分割レベルと分割数・分割後サイズ
     const DEVISION_LEVEL = 3;
-    const DEVISIONS = 2 ** DEVISION_LEVEL;
-    const UNIT_LENGTH = AREA_SIZE / DEVISIONS;
     // シミュレーション対象ボール数の初期値
     const BALLS_VOLUME = 16;
     // シミュレーション速度調整用の値
     const STEP_SCALE = 4;
-    // シミュレーション範囲限界とする平面オブジェクトの位置
-    const planePositions = [
-        new THREE.Vector3( AREA_HALF, 0, 0 ),  //right
-        new THREE.Vector3( -AREA_HALF, 0, 0 ), //left
-        new THREE.Vector3( 0, AREA_HALF, 0 ),  //ceil
-        new THREE.Vector3( 0, -AREA_HALF, 0 ), //floor
-        new THREE.Vector3( 0, 0, AREA_HALF ),  //front
-        new THREE.Vector3( 0, 0, -AREA_HALF ), //back
-    ];
-    // bit separator for division-level=3. (0 <= n <= 7)
-    const bitSep = ( n ) => {
-        let sep = n >>> 0;
-        sep = ( sep | ( sep << 8 ) ) & 0x0000f00f;
-        sep = ( sep | ( sep << 4 ) ) & 0x000c30c3;
-        sep = ( sep | ( sep << 2 ) ) & 0x00249249;
-        return sep;
-    }
-    const getMorton = ( v ) => {
-        return bitSep( v.x ) | ( bitSep( v.y ) << 1 ) | ( bitSep( v.z ) << 2 );
-    };
-    const getMortonIndex = ( a, b ) => {
-        const [aMorton, bMorton] = [getMorton( a ), getMorton( b )];
-        let bit = aMorton ^ bMorton;
-        let upperLevel = 0;
-        while ( bit ) {
-            bit = bit >> DEVISION_LEVEL;
-            upperLevel++;
-        }
-        const mortonNumber = aMorton >>> ( DEVISION_LEVEL * upperLevel );
-        const belongLevel = DEVISION_LEVEL - upperLevel;
-        const mortonIndex = mortonNumber + ( ( ( DEVISIONS ** belongLevel ) - 1 ) / ( DEVISIONS - 1 ) );
-        return mortonIndex;
-    }
     const fixed = ( num, fractionDigits = 1 ) => {
         return Number.parseFloat( num ).toFixed( fractionDigits );
     }
@@ -105,6 +68,7 @@ window.addEventListener( "DOMContentLoaded", ( ) => {
             );
             Ball.prototype.isBall = true;
             this.castShadow = true;
+            this.receiveShadow = true;
             // material
             this.originMaterial = this.material;
             // position
@@ -127,7 +91,7 @@ window.addEventListener( "DOMContentLoaded", ( ) => {
             this.moved = 0;
             this.beforePosition = this.position.clone();
             // 状態更新時の後処理
-            this.updated();
+            this.postProcess();
         }
         randomize ( ) {
             // material
@@ -166,7 +130,7 @@ window.addEventListener( "DOMContentLoaded", ( ) => {
             this.moved = 0;
             this.beforePosition = this.position.clone();
             // 状態更新時の後処理
-            this.updated();
+            this.postProcess();
         }
         update ( step ) {
             // 速度の変化
@@ -179,7 +143,7 @@ window.addEventListener( "DOMContentLoaded", ( ) => {
             // マテリアルを初期状態に戻す
             if ( this.originMaterial ) this.material = this.originMaterial;
             // 状態更新時の後処理
-            this.updated();
+            this.postProcess();
         }
         collisionPlane ( plane ) {
             /*
@@ -198,7 +162,7 @@ window.addEventListener( "DOMContentLoaded", ( ) => {
             const vConst = -( 1 + Ball.restitution ) * this.velocity.dot( plane.userData.normal );
             this.velocity.add( plane.userData.normal.clone().multiplyScalar( vConst ) );
             // 状態更新時の後処理
-            this.updated();
+            this.postProcess();
         }
         collisionBall ( other ) {
             /*
@@ -227,15 +191,9 @@ window.addEventListener( "DOMContentLoaded", ( ) => {
             this.velocity.add( c.clone().multiplyScalar( -other.mass * vConst ) );
             other.velocity.add( c.clone().multiplyScalar( this.mass * vConst ) );
             // 状態更新時の後処理
-            this.updated();
+            this.postProcess();
         }
-        updated () {
-            // morton index
-            const AABBMin = this.position.clone()
-                .sub( this.scale ).addScalar( AREA_HALF ).divideScalar( UNIT_LENGTH ).floor();
-            const AABBMax = this.position.clone()
-                .add( this.scale ).addScalar( AREA_HALF ).divideScalar( UNIT_LENGTH ).floor();
-            this.mortonIndex = getMortonIndex( AABBMin, AABBMax );
+        postProcess () {
             // moved distance
             this.moved += this.beforePosition.distanceTo( this.position );
             this.beforePosition = this.position.clone();
@@ -249,30 +207,156 @@ window.addEventListener( "DOMContentLoaded", ( ) => {
                 "Position     :" + toStringVector( this.position ) + "<br />" +
                 "Velocity     :" + toStringVector( this.velocity ) + "<br />" +
                 "Accelaration :" + toStringVector( this.acceleration ) + "<br />" +
-                "Morton(index):" + this.mortonIndex + "<br />" +
                 "Moved        :" + fixed( this.moved ) + "<br />"
             );
         }
     }
+    // ボックスクラス。平面オブジェクトで構成される。
+    class PlaneBox extends THREE.Group {
+        constructor ( size, center = new THREE.Vector3()  ) {
+            super();
+            // シミュレーション範囲限界とする平面オブジェクトの位置
+            const size_half = size / 2;
+            const planePositions = [
+                new THREE.Vector3( size_half, 0, 0 ),  //right
+                new THREE.Vector3( -size_half, 0, 0 ), //left
+                new THREE.Vector3( 0, size_half, 0 ),  //ceil
+                new THREE.Vector3( 0, -size_half, 0 ), //floor
+                new THREE.Vector3( 0, 0, size_half ),  //front
+                new THREE.Vector3( 0, 0, -size_half ), //back
+            ];
+            // 平面オブジェクトを作成・グループに追加
+            const planeBase = new THREE.Mesh(
+                new THREE.PlaneGeometry( size, size ),
+                new THREE.MeshStandardMaterial( { color: 0xcccccc, transparent: true, opacity: 0.8} )
+            );
+            planeBase.receiveShadow = true;
+            planePositions.forEach( position => {
+                const plane = planeBase.clone();
+                plane.position.copy( position );
+                plane.lookAt( center );
+                plane.geometry.computeBoundingBox();
+                plane.userData.bBox = new THREE.Box3().setFromObject( plane );
+                plane.userData.normal = center.clone().sub( plane.position ).normalize();
+                this.add( plane );
+            } );
+        }
+    }
+    // ８分木空間を可視化するクラス
+    class OctreeBoxes extends THREE.Group {
+        static DEVISIONS = 2 ** DEVISION_LEVEL;
+        static UNIT_LENGTH = AREA_SIZE / OctreeBoxes.DEVISIONS;
+        // bit separator for division-level=3. (0 <= n <= 7)
+        static bitSep = ( n ) => {
+            let sep = n >>> 0;
+            sep = ( sep | ( sep << 8 ) ) & 0x0000f00f;
+            sep = ( sep | ( sep << 4 ) ) & 0x000c30c3;
+            sep = ( sep | ( sep << 2 ) ) & 0x00249249;
+            return sep;
+        }
+        static getMorton = ( v ) => {
+            return (
+                OctreeBoxes.bitSep( v.x ) << 0 | 
+                OctreeBoxes.bitSep( v.y ) << 1 | 
+                OctreeBoxes.bitSep( v.z ) << 2
+            );
+        };
+        static getMortonIndex = ( position, scale ) => {
+            // console.log( position, scale );
+            const AABBMin = position.clone().sub( scale )
+                .addScalar( AREA_HALF ).divideScalar( OctreeBoxes.UNIT_LENGTH ).floor();
+            const AABBMax = position.clone().add( scale )
+                .addScalar( AREA_HALF ).divideScalar( OctreeBoxes.UNIT_LENGTH ).floor();
+            const [aMorton, bMorton] = [OctreeBoxes.getMorton( AABBMin ), OctreeBoxes.getMorton( AABBMax )];
+            let bit = aMorton ^ bMorton;
+            let upperLevel = 0;
+            while ( bit ) {
+                bit = bit >> DEVISION_LEVEL;
+                upperLevel++;
+            }
+            const mortonNumber = aMorton >>> ( DEVISION_LEVEL * upperLevel );
+            const belongLevel = DEVISION_LEVEL - upperLevel;
+            const mortonIndex = mortonNumber + ( ( ( OctreeBoxes.DEVISIONS ** belongLevel ) - 1 ) / ( OctreeBoxes.DEVISIONS - 1 ) );
+            return mortonIndex;
+        }
+        constructor ( ) {
+            super();
+            // ８分木分割空間ごとにユニット化する
+            const unitBase = new THREE.Mesh(
+                new THREE.BoxGeometry(
+                    OctreeBoxes.UNIT_LENGTH,
+                    OctreeBoxes.UNIT_LENGTH,
+                    OctreeBoxes.UNIT_LENGTH
+                ),
+                new THREE.MeshBasicMaterial( {
+                    color: 0xcccccc,
+                    wireframe: true,
+                } )
+            );
+            unitBase.visible = false;
+            this.mortonOrderArray = [];
+            for ( let l = 0; l <= DEVISION_LEVEL; l++ ) {
+                const level = 2 ** l;
+                const scale = OctreeBoxes.DEVISIONS / 2 ** l;
+                const offset = OctreeBoxes.DEVISIONS / 2 ** ( l + 1 );
+                for ( let i = 0; i < level; i++ ) {
+                    for ( let j = 0; j < level; j++ ) {
+                        for ( let k = 0; k < level; k++ ) {
+                            const unit = unitBase.clone();
+                            unit.position.set(
+                                ( i * scale + offset ) * OctreeBoxes.UNIT_LENGTH - AREA_HALF,
+                                ( j * scale + offset ) * OctreeBoxes.UNIT_LENGTH - AREA_HALF,
+                                ( k * scale + offset ) * OctreeBoxes.UNIT_LENGTH - AREA_HALF
+                            );
+                            unit.scale.set( scale, scale, scale );
+                            unit.geometry.computeBoundingBox();
+                            unit.userData.bBox = new THREE.Box3( );
+                            unit.userData.bBox.setFromObject( unit );
+                            this.mortonOrderArray[OctreeBoxes.getMortonIndex( unit.position, unit.scale )] = unit;
+                            this.add( unit );
+                        }
+                    }
+                }
+            }
+        }
+        update () {
+            this.children.forEach( unit => {
+                unit.visible = false;
+            } );
+        }
+        checkObject ( target ) {
+            if ( target.isObject3D ) {
+                const targetIndex = OctreeBoxes.getMortonIndex( target.position, target.scale );
+                const unit = this.mortonOrderArray[targetIndex];
+                if ( unit ) {
+                    unit.visible = true;
+                }
+            }
+        }
+    }
+    /* --------Scene-------- */
+    const scene = new THREE.Scene();
+    scene.add( new THREE.AxesHelper( AREA_SIZE ) );
+    console.info( scene );
+    /* --------Camera-------- */
+    const mainCam = new THREE.PerspectiveCamera( 75, window.innerWidth / window.innerHeight, 1, 5000 );
+    mainCam.position.set( AREA_HALF, AREA_SIZE, AREA_HALF );
+    console.info( mainCam );
     /* --------Renderer-------- */
     const renderer = new THREE.WebGLRenderer();
     renderer.shadowMap.enabled = true;
     renderer.shadowMap.type = THREE.PCFSoftShadowMap;
     renderer.setSize( window.innerWidth, window.innerHeight );
     document.body.appendChild( renderer.domElement );
-    /* --------Scene-------- */
-    const scene = new THREE.Scene();
-    scene.add( new THREE.AxesHelper( AREA_SIZE ) );
-    /* --------Camera-------- */
-    const mainCam = new THREE.PerspectiveCamera( 75, window.innerWidth / window.innerHeight, 1, 5000 );
-    mainCam.position.set( AREA_SIZE, AREA_SIZE * 0.2, AREA_SIZE );
-    console.info( mainCam );
+    console.info( renderer );
     /* --------OrbitControls-------- */
     const controls = new OrbitControls( mainCam, renderer.domElement );
+    controls.enableDamping = true;
+    // controls.autoRotate = true;
     /* --------Lights-------- */
     scene.add( new THREE.AmbientLight( 0xffffff, 0.05 ) );
-    const spotLight = new THREE.SpotLight( 0xffffff, 64 );
-    spotLight.angle = Math.PI / 12;
+    const spotLight = new THREE.SpotLight( 0xffffff, 80 );
+    spotLight.angle = Math.PI / 10;
     spotLight.castShadow = true;
     spotLight.decay = 0.8;
     spotLight.position.set( 0, AREA_SIZE, 0 );
@@ -282,7 +366,6 @@ window.addEventListener( "DOMContentLoaded", ( ) => {
     spotLight.target = spotLightTarget;
     scene.add( spotLightTarget );
     console.info( spotLight );
-    controls.enableDamping = true;
     /* --------Objects-------- */
     const ballSet = new Set();
     for ( let i = 0; i < BALLS_VOLUME; i++ ) {
@@ -292,59 +375,13 @@ window.addEventListener( "DOMContentLoaded", ( ) => {
         scene.add( ball );
     }
     /* --------Planes-------- */
-    const planes = [];
-    const planeBase = new THREE.Mesh(
-        new THREE.PlaneGeometry( AREA_SIZE, AREA_SIZE ),
-        new THREE.MeshStandardMaterial( { color: 0xabedef, transparent: true, opacity: 0.8} )
-    );
-    planeBase.receiveShadow = true;
-    planePositions.forEach( position => {
-        const plane = planeBase.clone();
-        plane.position.copy( position );
-        plane.lookAt( ORIGIN_POINT );
-        plane.geometry.computeBoundingBox();
-        plane.userData.bBox = new THREE.Box3().setFromObject( plane );
-        plane.userData.normal = ORIGIN_POINT.clone().sub( plane.position ).normalize();
-        scene.add( plane );
-        planes.push( plane );
-    } );
+    const simArea = new PlaneBox( AREA_SIZE );
+    scene.add( simArea );
+    console.info( simArea );
     /* --------Visualize Morton Area-------- */
-    const octreeUnits = [];
-    const unitBase = new THREE.Mesh(
-        new THREE.BoxGeometry(
-            UNIT_LENGTH, UNIT_LENGTH, UNIT_LENGTH,
-        ),
-        new THREE.MeshBasicMaterial( {
-            color: 0xcccccc,
-            wireframe: true,
-        } )
-    );
-    for ( let l = 0; l <= DEVISION_LEVEL; l++ ) {
-        // level 0 to DEVESION_LEVEL
-        const level = 2 ** l;
-        const scale = DEVISIONS / 2 ** l;
-        const offset = DEVISIONS / 2 ** ( l + 1 );
-        for ( let i = 0; i < level; i++ ) {
-            for ( let j = 0; j < level; j++ ) {
-                for ( let k = 0; k < level; k++ ) {
-                    const unit = unitBase.clone();
-                    unit.position.set(
-                        ( i * scale + offset ) * UNIT_LENGTH - AREA_HALF,
-                        ( j * scale + offset ) * UNIT_LENGTH - AREA_HALF,
-                        ( k * scale + offset ) * UNIT_LENGTH - AREA_HALF
-                    );
-                    unit.scale.set( scale, scale, scale );
-                    unit.geometry.computeBoundingBox();
-                    unit.userData.bBox = new THREE.Box3( );
-                    unit.userData.bBox.setFromObject( unit );
-                    const AABBMin = unit.position.clone().sub( unit.scale ).addScalar( AREA_HALF ).divideScalar( UNIT_LENGTH ).floor();
-                    const AABBMax = unit.position.clone().add( unit.scale ).addScalar( AREA_HALF ).divideScalar( UNIT_LENGTH ).floor();
-                    octreeUnits[getMortonIndex( AABBMin, AABBMax )] = unit;
-                    scene.add( unit );
-                }
-            }
-        }
-    }
+    const octreeUnits = new OctreeBoxes();
+    scene.add( octreeUnits );
+    console.info( octreeUnits );
     /* --------Raycaster with Mouse Position-------- */
     const raycaster = new THREE.Raycaster();
     const mouse = new THREE.Vector2();
@@ -368,22 +405,17 @@ window.addEventListener( "DOMContentLoaded", ( ) => {
         }
         // タイムスタンプをリセット
         handler.previousTimestamp = timestamp;
-        // 単位時間 step [ms]のオブジェクト状態をシミュレーションする
+        // 単位時間 step [ms] ごとのオブジェクト状態をシミュレーションする
         const step = handler.interval / 1000 * STEP_SCALE;
         handler.stepTime += step;
-        // spotlight target update
+        // ８分木分割空間の更新
+        octreeUnits.update();
+        // スポットライトのターゲットを移動
         spotLightTarget.position.set(
-            AREA_HALF / 2 * Math.cos( handler.stepTime / 3 ),
+            AREA_HALF / 2 * Math.cos( handler.stepTime / 4 ),
             0,
-            AREA_HALF / 2 * Math.sin( handler.stepTime / 3 )
+            AREA_HALF / 2 * Math.sin( handler.stepTime / 4 )
         );
-        // console.log( toStringVector( spotLightTarget.position ) );
-        // エリアの可視性を初期化
-        octreeUnits.forEach( unit => {
-            // const hasBall = Array.from( ballSet ).some( ball => unit.userData.bBox.intersectsSphere( ball.bSphere ) );
-            // unit.visible = hasBall;
-            unit.visible = false;
-        } );
         // ボール関連の情報
         ballSet.forEach( ball => {
             // ボールの状態を更新
@@ -416,7 +448,7 @@ window.addEventListener( "DOMContentLoaded", ( ) => {
                 e.velocity.setZ( -e.velocity.z * Ball.restitution );
             }
             */
-            planes.forEach( plane => {
+            simArea.children.forEach( plane => {
                 // todo ボールの速度が早いと突き抜ける。要修正。
                 if ( plane.userData.bBox.intersectsSphere( ball.bSphere ) ) {
                     ball.collisionPlane( plane );
@@ -429,11 +461,6 @@ window.addEventListener( "DOMContentLoaded", ( ) => {
                     ball.collisionBall( other );
                 }
             } );
-            // ボールが存在するモートン順序エリアのユニットを可視化
-            // const unit = units[ball.mortonIndex];
-            // if ( unit ) {
-            //     unit.visible = true;
-            // }
         } );
         // マウスカーソルのレイキャストと交差するオブジェクトを特定する
         let intersectBalls = 0;
@@ -446,10 +473,7 @@ window.addEventListener( "DOMContentLoaded", ( ) => {
                 ball.select();
                 dataViewer.innerHTML = ball.toString();
                 // ボールが存在するモートン順序エリアのユニットを可視化
-                const unit = octreeUnits[ball.mortonIndex];
-                if ( unit ) {
-                    unit.visible = true;
-                }
+                octreeUnits.checkObject( ball );
                 intersectBalls++;
             }
         } );
