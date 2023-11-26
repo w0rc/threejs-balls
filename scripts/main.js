@@ -12,10 +12,8 @@ window.addEventListener( "DOMContentLoaded", ( ) => {
     const GRAVITY = new THREE.Vector3( 0, -9.80665, 0 );
     // シミュレーションエリアのサイズ
     const AREA_SIZE = 256, AREA_HALF = AREA_SIZE / 2;
-    // シミュレーションエリアの分割レベルと分割数・分割後サイズ
-    const DEVISION_LEVEL = 3;
     // シミュレーション対象ボール数の初期値
-    const BALLS_VOLUME = 16;
+    const BALLS_VOLUME = 32;
     // シミュレーション速度調整用の値
     const STEP_SCALE = 4;
     const fixed = ( num, fractionDigits = 1 ) => {
@@ -51,6 +49,8 @@ window.addEventListener( "DOMContentLoaded", ( ) => {
         static restitution = 0.96;
         // 摩擦係数
         static friction = 0.96;
+        // デフォルトのスケール
+        static defaultScale = 16;
         // ジオメトリとマテリアル
         static geometries = {
             default: new THREE.SphereGeometry( 1 ),
@@ -74,14 +74,15 @@ window.addEventListener( "DOMContentLoaded", ( ) => {
             // position
             this.position.set( 0, 0, 0 );
             // scale
-            const scale = 16;
-            this.scale.set( scale, scale, scale );
+            this.scale.set(
+                Ball.defaultScale, Ball.defaultScale, Ball.defaultScale
+            );
             // boundingSphere
             this.geometry.computeBoundingSphere();
             this.bSphere = new THREE.Sphere( this.position );
-            this.bSphere.radius = Math.floor( this.geometry.boundingSphere.radius * scale );
+            this.bSphere.radius = Math.floor( this.geometry.boundingSphere.radius * Ball.defaultScale );
             // mass [kg]
-            this.mass = scale;
+            this.mass = Ball.defaultScale;
             // accelaration [m/s^2]
             this.acceleration = new THREE.Vector3( );
             if ( isGravityAffected ) this.acceleration.copy( GRAVITY );
@@ -109,7 +110,8 @@ window.addEventListener( "DOMContentLoaded", ( ) => {
             ];
             this.position.set( r * cp * ct , r * cp * st, r * sp );
             // scale
-            const scale = Math.floor( RANDOM.range( 6,12 ) );
+            const scale = Math.floor(
+                RANDOM.range( Ball.defaultScale * 0.25, Ball.defaultScale ) );
             this.scale.set( scale, scale, scale );
             // boundingSphere
             this.geometry.computeBoundingSphere();
@@ -181,13 +183,13 @@ window.addEventListener( "DOMContentLoaded", ( ) => {
             */
             // 衝突後の座標補正
             const p1p2 = this.position.clone().sub( other.position );
-            const h = ( this.bSphere.radius + other.bSphere.radius - p1p2.length() ) / 2;
+            const h = ( this.bSphere.radius + other.bSphere.radius - p1p2.length() ) * 0.5;
             const c = p1p2.normalize();
             this.position.add( c.clone().multiplyScalar( h ) );
             other.position.add( c.clone().multiplyScalar( -h ) );
             // 衝突後の速度計算
             const v1v2 = this.velocity.clone().sub( other.velocity );
-            const vConst = ( 1 + ( Ball.restitution * Ball.restitution ) ) / ( this.mass + other.mass ) * v1v2.dot( c );
+            const vConst = ( 1.0 + ( Ball.restitution * Ball.restitution ) ) / ( this.mass + other.mass ) * v1v2.dot( c );
             this.velocity.add( c.clone().multiplyScalar( -other.mass * vConst ) );
             other.velocity.add( c.clone().multiplyScalar( this.mass * vConst ) );
             // 状態更新時の後処理
@@ -244,7 +246,9 @@ window.addEventListener( "DOMContentLoaded", ( ) => {
     }
     // ８分木空間を可視化するクラス
     class OctreeBoxes extends THREE.Group {
-        static DEVISIONS = 2 ** DEVISION_LEVEL;
+        // シミュレーションエリアの分割レベルと分割数・分割後サイズ
+        static DEVISION_LEVEL = 3;
+        static DEVISIONS = 2 ** OctreeBoxes.DEVISION_LEVEL;
         static UNIT_LENGTH = AREA_SIZE / OctreeBoxes.DEVISIONS;
         // bit separator for division-level=3. (0 <= n <= 7)
         static bitSep = ( n ) => {
@@ -254,11 +258,11 @@ window.addEventListener( "DOMContentLoaded", ( ) => {
             sep = ( sep | ( sep << 2 ) ) & 0x00249249;
             return sep;
         }
-        static getMorton = ( v ) => {
+        static getMorton = ( vec ) => {
             return (
-                OctreeBoxes.bitSep( v.x ) << 0 | 
-                OctreeBoxes.bitSep( v.y ) << 1 | 
-                OctreeBoxes.bitSep( v.z ) << 2
+                OctreeBoxes.bitSep( vec.x ) << 0 | 
+                OctreeBoxes.bitSep( vec.y ) << 1 | 
+                OctreeBoxes.bitSep( vec.z ) << 2
             );
         };
         static getMortonIndex = ( position, scale ) => {
@@ -271,12 +275,13 @@ window.addEventListener( "DOMContentLoaded", ( ) => {
             let bit = aMorton ^ bMorton;
             let upperLevel = 0;
             while ( bit ) {
-                bit = bit >> DEVISION_LEVEL;
+                bit = bit >> OctreeBoxes.DEVISION_LEVEL;
                 upperLevel++;
             }
-            const mortonNumber = aMorton >>> ( DEVISION_LEVEL * upperLevel );
-            const belongLevel = DEVISION_LEVEL - upperLevel;
-            const mortonIndex = mortonNumber + ( ( ( OctreeBoxes.DEVISIONS ** belongLevel ) - 1 ) / ( OctreeBoxes.DEVISIONS - 1 ) );
+            const mortonNumber = aMorton >>> ( OctreeBoxes.DEVISION_LEVEL * upperLevel );
+            const belongLevel = OctreeBoxes.DEVISION_LEVEL - upperLevel;
+            const mortonIndex = mortonNumber + 
+                ( ( ( OctreeBoxes.DEVISIONS ** belongLevel ) - 1 ) / ( OctreeBoxes.DEVISIONS - 1 ) );
             return mortonIndex;
         }
         constructor ( ) {
@@ -295,7 +300,7 @@ window.addEventListener( "DOMContentLoaded", ( ) => {
             );
             unitBase.visible = false;
             this.mortonOrderArray = [];
-            for ( let l = 0; l <= DEVISION_LEVEL; l++ ) {
+            for ( let l = 0; l <= OctreeBoxes.DEVISION_LEVEL; l++ ) {
                 const level = 2 ** l;
                 const scale = OctreeBoxes.DEVISIONS / 2 ** l;
                 const offset = OctreeBoxes.DEVISIONS / 2 ** ( l + 1 );
@@ -337,18 +342,19 @@ window.addEventListener( "DOMContentLoaded", ( ) => {
     /* --------Scene-------- */
     const scene = new THREE.Scene();
     scene.add( new THREE.AxesHelper( AREA_SIZE ) );
-    console.info( scene );
+    // console.info( scene );
     /* --------Camera-------- */
     const mainCam = new THREE.PerspectiveCamera( 75, window.innerWidth / window.innerHeight, 1, 5000 );
     mainCam.position.set( AREA_HALF, AREA_SIZE, AREA_HALF );
-    console.info( mainCam );
+    // console.info( mainCam );
     /* --------Renderer-------- */
     const renderer = new THREE.WebGLRenderer();
     renderer.shadowMap.enabled = true;
     renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+    renderer.setPixelRatio( window.devicePixelRatio );
     renderer.setSize( window.innerWidth, window.innerHeight );
     document.body.appendChild( renderer.domElement );
-    console.info( renderer );
+    // console.info( renderer );
     /* --------OrbitControls-------- */
     const controls = new OrbitControls( mainCam, renderer.domElement );
     controls.enableDamping = true;
@@ -365,7 +371,7 @@ window.addEventListener( "DOMContentLoaded", ( ) => {
     spotLightTarget.position.set( 0, 0, 0 );
     spotLight.target = spotLightTarget;
     scene.add( spotLightTarget );
-    console.info( spotLight );
+    // console.info( spotLight );
     /* --------Objects-------- */
     const ballSet = new Set();
     for ( let i = 0; i < BALLS_VOLUME; i++ ) {
@@ -377,11 +383,11 @@ window.addEventListener( "DOMContentLoaded", ( ) => {
     /* --------Planes-------- */
     const simArea = new PlaneBox( AREA_SIZE );
     scene.add( simArea );
-    console.info( simArea );
+    // console.info( simArea );
     /* --------Visualize Morton Area-------- */
     const octreeUnits = new OctreeBoxes();
     scene.add( octreeUnits );
-    console.info( octreeUnits );
+    // console.info( octreeUnits );
     /* --------Raycaster with Mouse Position-------- */
     const raycaster = new THREE.Raycaster();
     const mouse = new THREE.Vector2();
@@ -545,5 +551,14 @@ window.addEventListener( "DOMContentLoaded", ( ) => {
             } );
             ballSet.clear();
         }
+    } );
+    // ウィンドウリサイズ時に表示を保持する
+    window.addEventListener( "resize", ( ) => {
+        const width = window.innerWidth;
+        const height = window.innerHeight;
+        renderer.setPixelRatio( window.devicePixelRatio );
+        renderer.setSize( width, height );
+        mainCam.aspect = width / height;
+        mainCam.updateProjectionMatrix();
     } );
 } );
