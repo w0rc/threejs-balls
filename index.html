@@ -5,15 +5,20 @@
         <meta charset="utf-8">
         <meta name="viewport" content="width=device-width, initial-scale=1">
 		<style>
-			body { margin: 0; }
-            #dataViewer { position:absolute; top: 10px; left: 10px; color:azure; user-select: none; }
-            #fpsViewer { position:absolute; bottom: 10px; left: 10px; color:azure; user-select: none; }
+			body { margin: 0; overflow: hidden; }
+            .viewer {
+                position:absolute;
+                color:azure;
+                user-select: none; white-space : pre;
+            }
+            #dataViewer { top: 10px; left: 10px; }
+            #fpsViewer { bottom: 10px; left: 10px; }
 		</style>
-      <script type="module" crossorigin src="./assets/index-5c06afdd.js"></script>
+      <script type="module" crossorigin src="./assets/index-7ef3e692.js"></script>
     </head>
     <body>
-        <div id="dataViewer">data</div>
-        <div id="fpsViewer">fps</div>
+        <div id="dataViewer" class="viewer">data</div>
+        <div id="fpsViewer" class="viewer">fps</div>
     </body>
     
 </html>
