@@ -18,10 +18,10 @@ window.addEventListener( "DOMContentLoaded", ( ) => {
     const STEP_SCALE = 4;
     const fixed = ( num, fractionDigits = 1 ) => {
         return Number.parseFloat( num ).toFixed( fractionDigits );
-    }
+    };
     const toStringVector = ( v ) => {
         return "[" + fixed( v.x ) + ", " + fixed( v.y ) + ", " + fixed( v.z ) + "]";
-    }
+    };
     /* --------Class-------- */
     class XorShift {
         static MAX = 0xffffffff;
@@ -167,7 +167,7 @@ window.addEventListener( "DOMContentLoaded", ( ) => {
             this.postProcess();
         }
         collisionBall ( other ) {
-            /*
+                        /*
                 x1 as this ball's param, x2 as other ball's param
                 correct position 
                     p1p2 = p1 - p2
@@ -375,7 +375,7 @@ window.addEventListener( "DOMContentLoaded", ( ) => {
     /* --------Objects-------- */
     const ballSet = new Set();
     for ( let i = 0; i < BALLS_VOLUME; i++ ) {
-        const ball = new Ball( );
+        const ball = new Ball( true );
         ball.randomize();
         ballSet.add( ball );
         scene.add( ball );
@@ -402,7 +402,7 @@ window.addEventListener( "DOMContentLoaded", ( ) => {
         interval: 1000,
         previousFrames : 0,
         timerStart : 0,
-    }
+    };
     const animate = ( timestamp ) => {
         // インターバル時間未満でリクエストされた場合はスキップする
         if ( timestamp - handler.previousTimestamp < handler.interval ) {
@@ -527,9 +527,9 @@ window.addEventListener( "DOMContentLoaded", ( ) => {
     window.addEventListener( "keydown", ( event ) => {
         // event.preventDefault();
         if ( event.key === " " ) {
-            const ball = new Ball( );
+            const ball = new Ball( true );
             ball.randomize();
-            ball.position.set( 0, 0, 0 );
+            ball.position.set( 0, AREA_HALF, 0 );
             ballSet.add( ball );
             scene.add( ball );
         }
